@@ -1,0 +1,23 @@
+_BASE_: "../Base-RCNN-FPN.yaml"
+MODEL:
+  WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
+  MASK_ON: True
+  RESNETS:
+    DEPTH: 50
+SOLVER:
+  IMS_PER_BATCH: 4
+  BASE_LR: 0.00025
+  MAX_ITER: 10000  # ← 画像数×エポック数÷バッチサイズで調整
+  STEPS: (6000, 8000)
+INPUT:
+  MIN_SIZE_TRAIN: (640, 800)
+  MAX_SIZE_TRAIN: 1333
+
+DATASETS:
+  TRAIN: ("carplate_train",)
+  TEST: ("carplate_val",)
+
+TEST:
+  EVAL_PERIOD: 500
+
+OUTPUT_DIR: "./output/carplate-maskrcnn"
