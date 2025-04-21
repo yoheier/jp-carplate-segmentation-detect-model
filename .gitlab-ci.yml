@@ -1,0 +1,14 @@
+stages:
+  - lint
+
+ruff:
+  stage: lint
+  image: python:3.11-slim
+  before_script:
+    - pip install ruff mypy
+  script:
+    - ruff .
+    - mypy .
+  only:
+    - merge_requests
+    - main
