@@ -7,7 +7,7 @@ ruff:
   before_script:
     - pip install ruff mypy
   script:
-    - ruff .
+    - ruff check .
     - mypy .
   only:
     - merge_requests
