@@ -1,14 +1,24 @@
 stages:
   - lint
+  - type-check
 
-ruff:
+variables:
+  PIP_NO_CACHE_DIR: "false"
+
+before_script:
+  - pip install --upgrade pip
+  - pip install ruff mypy
+
+ruff_lint:
   stage: lint
   image: python:3.11-slim
-  before_script:
-    - pip install ruff mypy
   script:
-    - ruff check .
-    - mypy .
-  only:
-    - merge_requests
-    - main
+    - echo "🔍 Running ruff linter"
+    - ruff check . --output-format=github  # エラーだけ表示（--fixはローカル運用推奨）
+
+mypy_check:
+  stage: type-check
+  image: python:3.11-slim
+  script:
+    - echo "🔍 Running mypy static type checker"
+    - mypy --install-types --non-interactive .
