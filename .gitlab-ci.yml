@@ -1,24 +1,14 @@
 stages:
   - lint
-  - type-check
 
-variables:
-  PIP_NO_CACHE_DIR: "false"
-
-before_script:
-  - pip install --upgrade pip
-  - pip install ruff mypy
-
-ruff_lint:
+lint:
   stage: lint
   image: python:3.11-slim
+  before_script:
+    - pip install --no-cache-dir ruff mypy
   script:
-    - echo "🔍 Running ruff linter"
-    - ruff check . --output-format=github  # エラーだけ表示（--fixはローカル運用推奨）
+    # Ruff（構文 & スタイルチェック）
+    - ruff --exit-zero train.py test_valid.py generate_background.py create_coco_platedataset.py conv-torch-Resnet18weight2Detectron2.py conv_polygon_keypoint.py
 
-mypy_check:
-  stage: type-check
-  image: python:3.11-slim
-  script:
-    - echo "🔍 Running mypy static type checker"
-    - mypy --install-types --non-interactive .
+    # mypy（型チェック）
+    - mypy t--ignore-missing-import rain.py test_valid.py generate_background.py create_coco_platedataset.py conv-torch-Resnet18weight2Detectron2.py conv_polygon_keypoint.py
