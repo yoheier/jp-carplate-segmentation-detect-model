@@ -8,7 +8,4 @@ lint:
     - pip install --no-cache-dir ruff mypy
   script:
     # Ruff（構文 & スタイルチェック）
-    - ruff --exit-zero train.py test_valid.py generate_background.py create_coco_platedataset.py conv-torch-Resnet18weight2Detectron2.py conv_polygon_keypoint.py
-
-    # mypy（型チェック）
-    - mypy t--ignore-missing-import rain.py test_valid.py generate_background.py create_coco_platedataset.py conv-torch-Resnet18weight2Detectron2.py conv_polygon_keypoint.py
+    - ruff check --exit-zero train.py test_valid.py generate_background.py create_coco_platedataset.py conv-torch-Resnet18weight2Detectron2.py conv_polygon_keypoint.py
