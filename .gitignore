@@ -25,7 +25,6 @@ venv/
 wandb/
 
 # pytorch/python/numpy formats
-*.pth
 *.pkl
 *.npy
 *.ts
