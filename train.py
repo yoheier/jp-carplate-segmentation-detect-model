@@ -13,7 +13,55 @@ from detectron2.data import transforms as T
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, EventWriter
 from detectron2.evaluation import COCOEvaluator
 from typing import Optional, Dict, Any
+from detectron2.engine.hooks import BestCheckpointer
+from detectron2.checkpoint import DetectionCheckpointer
+from detectron2.engine import HookBase
+from detectron2.utils.events import get_event_storage
 
+
+class EarlyStoppingHook(HookBase):
+    def __init__(self, patience: int = 5, metric_name: str = "segm/AP", mode: str = "max"):
+        self.patience = patience
+        self.metric_name = metric_name
+        self.mode = mode
+        self._best_value = None
+        self._counter = 0
+        self._stopped = False
+
+    def after_step(self):
+        # 評価タイミングでないと何もしない
+        if (self.trainer.iter + 1) % self.trainer.cfg.TEST.EVAL_PERIOD != 0:
+            return
+
+        latest_metrics = self.trainer.storage.latest()
+        current_value = None
+
+        # W&B ではなく Detectron2のstorageから値を取得
+        if self.metric_name in latest_metrics:
+            current_value = latest_metrics[self.metric_name]
+
+        if current_value is None:
+            return  # まだ取得できていない
+
+        if self._best_value is None or \
+           (self.mode == "max" and current_value > self._best_value) or \
+           (self.mode == "min" and current_value < self._best_value):
+            self._best_value = current_value
+            self._counter = 0  # reset patience
+        else:
+            self._counter += 1
+            if self._counter >= self.patience:
+                print(f"[EarlyStopping] No improvement in {self.patience} evals. Stopping at iter {self.trainer.iter}.")
+                self.trainer.storage.put_scalar("early_stopped", 1)
+                self._stopped = True
+
+                if wandb.run is not None:
+                    wandb.run.summary["early_stopped"] = True  # ←ここで記録するのがベスト
+
+                raise StopIteration  # Trainerを強制停止
+
+    def has_stopped(self) -> bool:
+        return self._stopped
 
 class WandbWriter(EventWriter):
     """
@@ -40,14 +88,14 @@ class CustomMapper:
     def __call__(self, dataset_dict):
         dataset_dict = dataset_dict.copy()
         image = utils.read_image(dataset_dict["file_name"], format="BGR")
-        aug = T.AugmentationList([
-            T.ResizeShortestEdge([800], 1333),
+        augs = [
+            T.ResizeShortestEdge(short_edge_length=(800, 1080), max_size=1333),
             T.RandomFlip(horizontal=True),
             T.RandomRotation([-10, 10]),
             T.RandomBrightness(0.9, 1.1),
             T.RandomContrast(0.9, 1.1),
-        ])
-        image, transforms = T.apply_augmentations(aug, image)
+        ]
+        image, transforms = T.apply_augmentations(augs, image)
         dataset_dict["image"] = torch.as_tensor(image.transpose(2, 0, 1))
         annos = [utils.transform_instance_annotations(obj, transforms, image.shape[:2]) for obj in dataset_dict["annotations"]]
         dataset_dict["instances"] = utils.annotations_to_instances(annos, image.shape[:2])
@@ -107,6 +155,20 @@ class TrainerWithAugWandb(TrainerWithAug):
     TrainerWithAug に WandB 評価ログ機能を追加した Trainer クラス。
     """
 
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.checkpointer = DetectionCheckpointer(self.model, cfg.OUTPUT_DIR)
+        self.register_hooks([
+            BestCheckpointer(
+                cfg.TEST.EVAL_PERIOD,
+                self.checkpointer,
+                val_metric="segm/AP",
+                mode="max",
+                file_prefix="best_model"
+            ),
+            EarlyStoppingHook(patience=3, metric_name="segm/AP", mode="max")
+        ])
+
     def build_writers(self) -> list:
         return [
             CommonMetricPrinter(self.cfg.SOLVER.MAX_ITER),
@@ -149,8 +211,8 @@ class TrainerWithAugWandb(TrainerWithAug):
                         f"{dataset_name}/segm/AP50": result["segm"]["AP50"],
                         f"{dataset_name}/segm/AP75": result["segm"]["AP75"],
                     })
-                step = getattr(self, "iter", None)
-                wandb.log(logs, step=step)
+                step = get_event_storage().iter  # ← これで現在のステップを確実に取得
+                wandb.run.log(logs, step=step)
         return results
 
 
@@ -167,6 +229,7 @@ def setup_cfg(args: argparse.Namespace) -> Any:
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_18_FPN_1x.yaml"))
 
+    cfg.TEST.EVAL_PERIOD = 500  # 1000 iteration ごとに eval 実行
     # COCO形式の学習・検証データセットを登録
     register_coco_instances("plate_train", {}, os.path.join(args.dataset_path, "train.json"), os.path.join(args.dataset_path, "train/images"))
     register_coco_instances("plate_val", {}, os.path.join(args.dataset_path, "val.json"), os.path.join(args.dataset_path, "val/images"))
@@ -177,12 +240,12 @@ def setup_cfg(args: argparse.Namespace) -> Any:
     cfg.MODEL.WEIGHTS = "R-18-detectron2-converted.pth"  # torchの重みをdetectron2向けに変換したもの
     cfg.MODEL.BACKBONE.FREEZE_AT = 2
     cfg.MODEL.RESNETS.DEPTH = 18
-    cfg.MODEL.RESNETS.RES2_OUT_CHANNELS = 64  # ★ R18/R34には必須！
+    cfg.MODEL.RESNETS.RES2_OUT_CHANNELS = 64  # R18/R34には必須！
 
     # 学習スケジューラ設定（15エポック相当）
     cfg.SOLVER.IMS_PER_BATCH = 4
     cfg.SOLVER.BASE_LR = 0.0005  # ResNet18は比較的高めの学習率が安定する
-    cfg.SOLVER.MAX_ITER = 52905
+    cfg.SOLVER.MAX_ITER = args.max_iter
     cfg.SOLVER.STEPS = (40000, 47000)
     cfg.SOLVER.WARMUP_FACTOR = 0.001
     cfg.SOLVER.WARMUP_ITERS = 1000
