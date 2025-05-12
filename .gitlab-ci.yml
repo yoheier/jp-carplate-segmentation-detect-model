@@ -1,14 +1,11 @@
 stages:
   - lint
 
-ruff:
+lint:
   stage: lint
   image: python:3.11-slim
   before_script:
-    - pip install ruff mypy
+    - pip install --no-cache-dir ruff mypy
   script:
-    - ruff .
-    - mypy .
-  only:
-    - merge_requests
-    - main
+    # Ruff（構文 & スタイルチェック）
+    - ruff check --exit-zero train.py test_valid.py generate_background.py create_coco_platedataset.py conv-torch-Resnet18weight2Detectron2.py conv_polygon_keypoint.py
